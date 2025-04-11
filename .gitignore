@@ -1,0 +1,23 @@
+# 基础忽略
+node_modules/
+dist/
+.env
+.mcpconfig
+.DS_Store
+
+# 编译文件
+*.js
+*.js.map
+*.d.ts
+
+# 日志文件
+*.log
+npm-debug.log*
+
+# 测试覆盖率
+coverage/
+.nyc_output/
+
+# 编辑器配置
+.vscode/
+.idea/
