@@ -6,7 +6,6 @@ import { McpConfigService } from '../config/mcp-config.service';
 import { ProtocolAdapters } from '../protocol/protocol-adapters.type';
 import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto'; // Added import for WorkflowTaskDto
 import { McpWorker } from '../interfaces/mcp-server.interface';
-import { RedisService } from '../../core/data-relation.service';
 
 @Injectable()
 export class McpDiscoveryService implements McpDiscoveryService {
