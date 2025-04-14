@@ -1,49 +1,84 @@
 // Combined and cleaned imports
 import { Injectable, Logger, Inject, NotFoundException, InternalServerErrorException } from '@nestjs/common'; 
 import { ServerRegistry } from './server-registry';
-import { McpServer, ServerStatus } from '../interfaces/mcp-server.interface';
+import { McpServer, ServerStatus } from '../../interfaces/mcp-server.interface';
 import { McpConfigService } from '../config/mcp-config.service';
 import { ProtocolAdapters } from '../protocol/protocol-adapters.type';
-import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto'; // Added import for WorkflowTaskDto
-import { McpWorker } from '../interfaces/mcp-server.interface';
+import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto';
+import { McpWorker } from '../../interfaces/mcp-server.interface';
+import { ServerMetrics } from '../../interfaces/mcp-server.interface';
 
 @Injectable()
 export class McpDiscoveryService implements McpDiscoveryService {
-  private readonly serverRegistry = new Map<string, McpServer>();
-  async getOptimalWorker(task: WorkflowTaskDto): Promise<McpWorker> {
-    // 实现基于负载均衡算法选择最优节点
-    const availableWorkers = this.getAvailableWorkers();
-    return availableWorkers[0]; // 示例实现，应替换为实际算法
-  }
-
-  // 补充缺失的辅助方法
-  public getAvailableWorkers(): McpWorker[] {
-    return Array.from(this.serverRegistry.values()).filter(
-      s => s.status === 'healthy' || s.status === 'connected'
-    ) as McpWorker[];
-  }
-
-  private getWorkerById(workerId: string): McpWorker {
-    const worker = this.serverRegistry.get(workerId);
-    if (!worker) throw new Error(`Worker ${workerId} not found`);
-    return worker as McpWorker;
-  }
   private readonly logger = new Logger(McpDiscoveryService.name);
+  private roundRobinIndex = 0;
 
-  async registerServer(config: any): Promise<any> {
-    const adapter = this.adapters[config.protocol];
-    const server = await adapter.discover(config);
-    if (this.registry.getServer(server.id)) {
-      throw new Error('服务器已存在');
-    }
-    return this.registry.register(server);
-  }
-  
   constructor(
     private readonly registry: ServerRegistry,
     private readonly config: McpConfigService,
     @Inject('PROTOCOL_ADAPTERS') private readonly adapters: ProtocolAdapters
   ) {}
+
+  async registerServer(server: McpServer): Promise<McpServer> {
+    const existingServer = this.registry.getServer(server.id);
+    if (existingServer) {
+      throw new Error('Server already registered');
+    }
+
+    const adapter = this.adapters[server.protocol];
+    const discoveredServer = await adapter.discover(server.config);
+    if (!discoveredServer) {
+      throw new Error('Failed to discover server');
+    }
+
+    server.status = 'connected';
+    server.lastHeartbeat = Date.now();
+    server.capabilities = discoveredServer.capabilities;
+    server.name = discoveredServer.name;
+    server.version = discoveredServer.version;
+    
+    return this.registry.register(server);
+  }
+
+  public getAvailableWorkers(): McpWorker[] {
+    return this.registry.getAllServers()
+      .filter(s => s.status === 'healthy' || s.status === 'connected')
+      .map(server => ({
+        ...server,
+        currentLoad: 0,
+        capacity: 100,
+        metrics: server.metrics || {
+          cpuUsage: 0,
+          memoryUsage: 0,
+          avgLatency: 0,
+          errorRate: 0,
+          errorCount: 0,
+          totalTasks: 0,
+          taskQueueSize: 0,
+          lastUpdated: Date.now()
+        }
+      })) as McpWorker[];
+  }
+
+  private getWorkerById(workerId: string): McpWorker {
+    const worker = this.registry.getServer(workerId);
+    if (!worker) throw new Error(`Worker ${workerId} not found`);
+    return worker as McpWorker;
+  }
+
+  async getOptimalWorker(task: WorkflowTaskDto): Promise<McpWorker> {
+    const workers = this.getAvailableWorkers();
+    if (!workers.length) {
+      throw new NotFoundException('No workers available');
+    }
+
+    // 根据负载和任务队列大小选择最优的工作节点
+    return workers.reduce((optimal, current) => {
+      const optimalLoad = optimal.currentLoad + ((optimal.metrics?.taskQueueSize || 0) / optimal.capacity);
+      const currentLoad = current.currentLoad + ((current.metrics?.taskQueueSize || 0) / current.capacity);
+      return currentLoad < optimalLoad ? current : optimal;
+    });
+  }
 
   async discoverServers(): Promise<void> {
     const configs = this.config.getServerConfigs();
@@ -77,10 +112,28 @@ export class McpDiscoveryService implements McpDiscoveryService {
   }
 
   verifyCompatibility(server: McpServer): boolean {
-    const [major] = server.version.split('.').map(Number);
-    return major >= 2; // 要求MCP协议主版本≥2
+    const [major, minor, patch] = server.version.split('.').map(Number);
+    // 要求协议版本≥2.3.1 或 ≥3.0.0
+    return (major === 2 && minor >= 3 && patch >= 1) || major >= 3;
   }
 
+  private calculateHealthScore(server: McpServer): number {
+    // 综合健康评分算法（权重可配置）
+    const weights = {
+      cpu: 0.3,
+      memory: 0.3,
+      latency: 0.2,
+      errorRate: 0.2
+    };
+    
+    return Math.min(
+      100,
+      (100 - server.metrics.cpuUsage) * weights.cpu +
+      (100 - server.metrics.memoryUsage) * weights.memory +
+      (100 - Math.min(server.metrics.avgLatency, 1000)/10) * weights.latency +
+      (100 - (server.metrics.errorRate * 100)) * weights.errorRate
+    );
+  }
 
   async checkHeartbeat(serverId: string): Promise<boolean> {
     const server = this.registry.getServer(serverId);
@@ -106,6 +159,10 @@ export class McpDiscoveryService implements McpDiscoveryService {
     return this.registry.getAllServers();
   }
 
+  getRegisteredServers(): McpServer[] {
+    return this.getAllRegisteredServers();
+  }
+
   /**
    * Executes a task on a specific worker identified by its ID.
    * @param workerId The ID of the MCP server (worker) to execute the task on.
@@ -115,46 +172,61 @@ export class McpDiscoveryService implements McpDiscoveryService {
    * @throws InternalServerErrorException if the worker is found but not healthy or if the protocol adapter fails.
    */
   async executeTaskOnWorker(workerId: string, task: WorkflowTaskDto): Promise<any> {
-    this.logger.log(`Attempting to execute task ${task.taskId} on worker ${workerId}`);
-    const server = this.registry.getServer(workerId);
-
-    if (!server) {
-      this.logger.error(`Worker ${workerId} not found in registry.`);
+    const worker = this.getWorkerById(workerId);
+    if (!worker) {
       throw new NotFoundException(`Worker ${workerId} not found`);
     }
 
-    // Optional: Add more sophisticated status checks if needed
-    if (server.status !== 'healthy' && server.status !== 'connected') {
-       this.logger.error(`Worker ${workerId} is not in a healthy or connected state (current: ${server.status}). Cannot execute task ${task.taskId}.`);
-       throw new InternalServerErrorException(`Worker ${workerId} is not healthy (status: ${server.status})`);
-    }
-
     try {
-      const adapter = this.adapters[server.protocol];
+      const adapter = this.adapters[worker.protocol];
       
-      // Check if the adapter exists
-      if (!adapter) {
-         this.logger.error(`No protocol adapter found for worker ${workerId} (protocol: ${server.protocol})`);
-         throw new InternalServerErrorException(`Protocol adapter for ${server.protocol} not found on worker ${workerId}`);
-      }
+      // 更新任务队列大小
+      this.updateWorkerMetrics(worker, {
+        taskQueueSize: ((worker.metrics?.taskQueueSize || 0) + 1)
+      });
 
-      // Type guard to check if executeTask exists on the specific adapter instance
-      // We cast to 'any' to bypass the initial union type check, relying on the runtime check.
-      if (typeof (adapter as any).executeTask !== 'function') { 
-         this.logger.error(`Protocol adapter for ${server.protocol} on worker ${workerId} does not support executeTask.`);
-         throw new InternalServerErrorException(`Worker ${workerId} (protocol: ${server.protocol}) does not support task execution.`);
-      }
+      const result = await adapter.executeTask(worker, task);
       
-      this.logger.debug(`Delegating task ${task.taskId} execution to protocol adapter for worker ${workerId}`);
-      // Now we know adapter.executeTask exists (due to the check above)
-      // Assuming the adapter's executeTask method takes the server object and the task DTO
-      const result = await (adapter as any).executeTask(server, task); 
-      this.logger.log(`Task ${task.taskId} execution initiated successfully on worker ${workerId}.`);
-      return result; // Return the result obtained from the adapter
+      // 更新成功执行的任务指标
+      this.updateWorkerMetrics(worker, {
+        totalTasks: (worker.metrics?.totalTasks || 0) + 1,
+        taskQueueSize: Math.max(0, (worker.metrics?.taskQueueSize || 1) - 1),
+        lastTaskTime: Date.now()
+      });
+
+      return result;
     } catch (error) {
-      this.logger.error(`Failed to execute task ${task.taskId} on worker ${workerId}: ${error.message}`, error.stack);
-      // Rethrow a generic server error or the specific error if needed
-      throw new InternalServerErrorException(`Failed to execute task on worker ${workerId}: ${error.message}`);
+      this.logger.error(`Failed to execute task on worker ${workerId}: ${error.message}`);
+      
+      // 更新错误指标
+      this.updateWorkerMetrics(worker, {
+        errorCount: (worker.metrics?.errorCount || 0) + 1,
+        errorRate: ((worker.metrics?.errorCount || 0) + 1) / ((worker.metrics?.totalTasks || 0) + 1),
+        taskQueueSize: Math.max(0, (worker.metrics?.taskQueueSize || 1) - 1)
+      });
+
+      throw new InternalServerErrorException(`Task execution failed: ${error.message}`);
     }
+  }
+
+  private updateWorkerMetrics(worker: McpWorker, metrics: Partial<ServerMetrics>): void {
+    const currentMetrics = worker.metrics || {
+      cpuUsage: 0,
+      memoryUsage: 0,
+      avgLatency: 0,
+      errorRate: 0,
+      errorCount: 0,
+      totalTasks: 0,
+      taskQueueSize: 0,
+      lastUpdated: Date.now()
+    };
+
+    worker.metrics = {
+      ...currentMetrics,
+      ...metrics,
+      lastUpdated: Date.now()
+    };
+    
+    this.registry.updateServer(worker);
   }
 }

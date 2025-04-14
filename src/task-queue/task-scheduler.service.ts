@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
+import { Queue, Job } from 'bull';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -10,7 +10,7 @@ export class TaskSchedulerService {
     private configService: ConfigService
   ) {}
 
-  async scheduleTask(taskId: string, payload: any, delay?: number) {
+  async scheduleTask(taskId: string, payload: any, delay?: number): Promise<Job> {
     const options = delay ? { 
       delay,
       attempts: this.configService.get('TASK_MAX_RETRIES') || 3
@@ -18,17 +18,25 @@ export class TaskSchedulerService {
       attempts: this.configService.get('TASK_MAX_RETRIES') || 3
     };
     
-    await this.taskQueue.add('executeTask', { taskId, payload }, options);
+    return this.taskQueue.add('process', { id: taskId, ...payload }, options);
   }
 
-  async scheduleDelayedTask(taskId: string, delayMs: number, payload: any) {
-    await this.taskQueue.add('delayedTask', 
-      { taskId, delay: delayMs, payload }, 
+  async scheduleDelayedTask(taskId: string, delayMs: number, payload: any): Promise<Job> {
+    return this.taskQueue.add('delayedTask', 
+      { id: taskId, ...payload }, 
       { 
         delay: delayMs,
         attempts: this.configService.get('TASK_MAX_RETRIES') || 3
       }
     );
+  }
+
+  async getJobStatus(taskId: string): Promise<string> {
+    const job = await this.taskQueue.getJob(taskId);
+    if (!job) {
+      return 'not_found';
+    }
+    return job.getState();
   }
 
   async executeTask(taskId: string, payload: any) {

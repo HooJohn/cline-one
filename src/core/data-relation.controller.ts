@@ -4,13 +4,13 @@ import { AnalyzeDataRelationsDto } from './dto/data-relation.dto';
 
 @Controller('data-relation')
 export class DataRelationController {
-  constructor(private readonly dataRelationService: RedisService) {}
+  constructor(private readonly RedisService: RedisService) {}
 
   @Post('analyze')
   async analyzeRelations(@Body() dto: AnalyzeDataRelationsDto) {
     try {
       const startTime = Date.now();
-      const result = await this.dataRelationService.analyzeCrossSourceRelations(dto.sources);
+      const result = await this.RedisService.analyzeCrossSourceRelations(dto.sources);
       const duration = Date.now() - startTime;
       
       return {

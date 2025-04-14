@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { readFileSync, watch } from 'fs';
 import { join } from 'path';
-import type { McpServerConfig } from '../interfaces/mcp-server.interface';
+import type { McpServerConfig } from '../../interfaces/mcp-server.interface';
 
 @Injectable()
 export class McpConfigService {

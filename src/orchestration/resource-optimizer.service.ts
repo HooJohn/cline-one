@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { McpDiscoveryService } from '../mcp-gateway/discovery/mcp-discovery.service';
 import { LlmAdapterService } from '../llm/llm-adapter.service';
-import { McpServer, ServerStatus } from '../mcp-gateway/interfaces/mcp-server.interface';
+import { McpServer, ServerStatus } from '../interfaces/mcp-server.interface';
 import { WorkflowTaskDto } from './dto/workflow-task.dto';
 import * as os from 'os';
 import * as osUtils from 'os-utils';
@@ -38,8 +38,10 @@ export class ResourceOptimizerService {
 
   async optimize(resources: any[]): Promise<any> {
     const optimized = await this.llmAdapter.analyze({
-      system: "你是一个资源优化专家，请根据以下资源列表生成优化方案",
-      prompt: JSON.stringify(resources)
+      templateType: 'resource-optimization',
+      variables: {
+        resources: JSON.stringify(resources)
+      }
     });
 
     return {
@@ -258,13 +260,18 @@ export class ResourceOptimizerService {
 
   private adjustResourcesBasedOnMetrics(metrics: SystemMetrics) {
     const { cpuUsage, freeMem, totalMem } = metrics;
+    // 使用process.memoryUsage()获取更精确的Node进程内存使用
+    const processMem = process.memoryUsage();
     const usedMem = totalMem - freeMem;
     const memUsagePercent = (usedMem / totalMem) * 100;
     const dynamicMemThreshold = this.config.get('MEM_THRESHOLD') || 
       Math.min(0.3, 0.15 + (0.15 * (cpuUsage / 100)));
 
-    // 增强内存监控日志
-    this.logger.debug(`内存状态: 总内存=${totalMem.toFixed(1)}MB, 已用=${usedMem.toFixed(1)}MB (${memUsagePercent.toFixed(1)}%)`);
+    // 优化日志格式并添加进程内存信息
+    this.logger.debug(`[内存监控] 系统内存: 总=${totalMem.toFixed(1)}MB 已用=${usedMem.toFixed(1)}MB (${memUsagePercent.toFixed(1)}%)
+      进程内存: RSS=${(processMem.rss/1024/1024).toFixed(1)}MB 
+      HeapTotal=${(processMem.heapTotal/1024/1024).toFixed(1)}MB
+      HeapUsed=${(processMem.heapUsed/1024/1024).toFixed(1)}MB`);
 
     // 内存优化策略（添加二次验证）
     if (usedMem > dynamicMemThreshold * totalMem && memUsagePercent > 85) {

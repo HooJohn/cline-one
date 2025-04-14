@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
-import type { McpServer, McpServerConfig } from '../interfaces/mcp-server.interface';
+import type { McpServer, McpServerConfig } from '../../interfaces/mcp-server.interface';
+import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto';
 import { HttpAdapter } from './http.adapter';
 import { SseAdapter } from './sse.adapter';
 import { WebSocketAdapter } from './websocket.adapter';
@@ -7,6 +8,7 @@ import { WebSocketAdapter } from './websocket.adapter';
 export interface ProtocolAdapter extends EventEmitter {
   discover(config: McpServerConfig): Promise<McpServer | null>;
   checkHeartbeat(server: McpServer): Promise<boolean>;
+  executeTask(server: McpServer, task: WorkflowTaskDto): Promise<any>;
   on(event: 'connected', listener: (server: McpServer) => void): this;
   on(event: 'error', listener: (error: Error) => void): this;
 }

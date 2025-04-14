@@ -1,24 +1,30 @@
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { createClient } from 'redis';
-import type { RedisClientType } from 'redis';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { LlmAdapterService } from '../llm/llm-adapter.service';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'yaml';
+import { createClient } from 'redis';
 
 @Injectable()
 export class RedisService {
-  private client: RedisClientType;
   private readonly logger = new Logger(RedisService.name);
+  private templates = new Map<string, string>();
+  private client;
 
   constructor(
-    @Optional() @Inject(LlmAdapterService) private readonly llmAdapter?: LlmAdapterService
+    @Inject('CONFIG_PATH') private readonly configPath: string,
+    private readonly llmAdapter: LlmAdapterService
   ) {
+    this.loadTemplates();
+    this.setupFileWatcher();
+    this.initializeRedisClient();
+  }
+
+  private async initializeRedisClient() {
     this.client = createClient({
-      url: process.env.REDIS_URL || 'redis://localhost:6379',
-      socket: {
-        reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
-      }
-    }) as RedisClientType;
-    
-    this.client.connect().catch(console.error);
+      url: process.env.REDIS_URL || 'redis://localhost:6379'
+    });
+    await this.client.connect();
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
@@ -29,25 +35,48 @@ export class RedisService {
   }
 
   async get(key: string): Promise<string | null> {
-    return this.client.get(key);
+    return await this.client.get(key);
+  }
+  
+  private async loadTemplates() {
+    try {
+      const templatePath = path.join(process.cwd(), 'src', this.configPath, 'prompt-templates.yaml');
+      this.logger.log(`Loading templates from: ${templatePath}`);
+      const content = await fs.promises.readFile(templatePath, 'utf8');
+      const parsed = yaml.parse(content);
+      
+      for (const [name, template] of Object.entries(parsed.system_templates)) {
+        this.templates.set(name, template as string);
+      }
+      
+      this.logger.log(`成功加载${this.templates.size}个提示模板`);
+    } catch (error) {
+      this.logger.error('加载提示模板失败', error.stack);
+    }
   }
 
-  async hSet(key: string, field: string, value: string): Promise<number> {
-    return this.client.hSet(key, field, value);
+  private setupFileWatcher() {
+    const watchPath = path.join(process.cwd(), 'src', this.configPath);
+    this.logger.log(`Setting up file watcher for: ${watchPath}`);
+    
+    const watcher = fs.watch(watchPath, (eventType, filename) => {
+      if (filename === 'prompt-templates.yaml') {
+        this.logger.log('检测到模板文件变更，重新加载...');
+        this.loadTemplates();
+      }
+    });
+    
+    watcher.on('error', error => {
+      this.logger.error('文件监视错误', error.stack);
+    });
   }
 
-  async hGetAll(key: string): Promise<Record<string, string>> {
-    return this.client.hGetAll(key);
-  }
-
-  async publish(channel: string, message: string): Promise<number> {
-    return this.client.publish(channel, message);
-  }
-
-  async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
-    const subscriber = this.client.duplicate();
-    await subscriber.connect();
-    await subscriber.subscribe(channel, (message) => callback(message));
+  getTemplate(name: string): string {
+    const template = this.templates.get(name);
+    if (!template) {
+      throw new Error(`找不到提示模板: ${name}`);
+    }
+    return template;
   }
 
   async analyzeCrossSourceRelations(sources: Array<{
@@ -57,28 +86,20 @@ export class RedisService {
   }>): Promise<any> {
     this.logger.log(`开始分析数据源关系：${sources.map(s => `${s.mcpServer}:${s.resourceUri}`).join(', ')}`);
     
-    // 1. 从Redis获取元数据
-    const metadataPromises = sources.map(source => 
-      this.hGetAll(`metadata:${source.mcpServer}:${source.resourceUri}`)
-    );
-    const metadataResults = await Promise.all(metadataPromises);
-    
-    // 2. 准备LLM分析请求
+    // 1. 准备LLM分析请求
     const analysisPrompt = `请分析以下数据源的关联关系：
-${metadataResults.map((meta, i) => `数据源 ${sources[i]}:\n${JSON.stringify(meta, null, 2)}`).join('\n\n')}`;
+      ${sources.map((s, i) => `数据源 ${i + 1}:\n类型: ${s.dataType}\n路径: ${s.resourceUri}`).join('\n\n')}`;
 
-    // 3. 调用LLM服务
-    if (!this.llmAdapter) {
-      throw new Error('LLM service unavailable - 请确认以下配置：\n1. LlmModule已正确导入到AppModule\n2. LlmAdapterService已注册为提供者\n3. 环境变量配置正确');
-    }
+    // 2. 调用LLM服务
     const llmResponse = await this.llmAdapter.analyze({
-      system: "你是一个数据关系分析专家，请识别数据源之间的潜在关联",
-      prompt: analysisPrompt
+      templateType: 'data-relation-analysis',
+      variables: {
+        analysisPrompt: analysisPrompt
+      }
     });
 
-    // 4. 缓存分析结果
+    // 3. 生成分析ID
     const correlationId = require('crypto').randomUUID();
-    await this.set(`analysis:${correlationId}`, JSON.stringify(llmResponse), 3600);
 
     return { 
       correlationId,

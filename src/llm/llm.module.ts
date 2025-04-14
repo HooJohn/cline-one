@@ -1,18 +1,18 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LlmAdapterService } from './llm-adapter.service';
-import { DeepseekProvider } from './deepseek.provider';
+import { LLMAdapter } from './llm.provider';
 
 @Module({
   imports: [],
   providers: [
-    DeepseekProvider,
+    LLMAdapter,
     {
       provide: 'LLM_PROVIDER',
-      useExisting: DeepseekProvider
+      useExisting: LLMAdapter
     },
     LlmAdapterService
   ],
-  exports: [LlmAdapterService]
+  exports: [LlmAdapterService, LLMAdapter, 'LLM_PROVIDER']
 })
 export class LlmModule {}

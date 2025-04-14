@@ -4,7 +4,7 @@ import { LlmAdapterService } from '../llm/llm-adapter.service';
 import { ExecutionPlanDto } from './dto/execution-plan.dto';
 import { WorkflowTaskDto } from './dto/workflow-task.dto';
 import { RetryPolicy } from '../core/dto/retry-policy.dto';
-import { McpServer } from '../mcp-gateway/interfaces/mcp-server.interface';
+import { McpServer } from '../interfaces/mcp-server.interface';
 import { ConfigService } from '@nestjs/config';
 
 interface ActiveTaskInfo {

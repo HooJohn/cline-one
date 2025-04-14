@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ServerStatus, McpServer } from '../interfaces/mcp-server.interface';
+import { ServerStatus, McpServer } from '../../interfaces/mcp-server.interface';
 
 @Injectable()
 export class ServerRegistry implements OnModuleInit {
@@ -10,12 +10,13 @@ export class ServerRegistry implements OnModuleInit {
     this.logger.log('Server registry initialized');
   }
 
-  register(server: McpServer): void {
+  register(server: McpServer): McpServer {
     const existing = this.servers.get(server.id);
     if (existing) {
       this.logger.warn(`Overwriting existing server registration: ${server.id}`);
     }
     this.servers.set(server.id, server);
+    return server;
   }
 
   unregister(serverId: string): boolean {
@@ -30,8 +31,16 @@ export class ServerRegistry implements OnModuleInit {
     const server = this.servers.get(serverId);
     if (server) {
       server.status = status;
-      server.lastSeen = new Date();
+      server.lastSeen = Date.now();
     }
+  }
+
+  updateServer(server: McpServer): void {
+    if (!this.servers.has(server.id)) {
+      this.logger.warn(`Attempting to update non-existent server: ${server.id}`);
+      return;
+    }
+    this.servers.set(server.id, server);
   }
 
   getServer(serverId: string): McpServer | undefined {

@@ -1,93 +1,119 @@
 import { EventEmitter } from 'events';
-import { McpServer, McpServerConfig, ServerStatus } from '../interfaces/mcp-server.interface';
+import { Injectable, Logger } from '@nestjs/common';
+import { McpServer, McpServerConfig } from '../../interfaces/mcp-server.interface';
 import { ProtocolAdapter } from './protocol-adapters.type';
+import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto';
+import axios from 'axios';
+import { EventSource } from 'eventsource';
 
+@Injectable()
 export class SseAdapter extends EventEmitter implements ProtocolAdapter {
-  public keepAliveInterval = 15000;
-  public maxRetries = 3;
+  private readonly logger = new Logger(SseAdapter.name);
   private eventSource: EventSource | null = null;
-
-  private handleError(message: string): null {
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-    }
-    
-    // 使用 process.nextTick 来避免未处理的错误
-    process.nextTick(() => {
-      try {
-        this.emit('error', new Error(message));
-      } catch (error) {
-        // 在生产环境中，我们可能想要将这些错误发送到错误监控服务
-        console.error('Error emitting error event:', error);
-      }
-    });
-    
-    return null;
-  }
 
   async discover(config: McpServerConfig): Promise<McpServer | null> {
     try {
-      this.eventSource = new EventSource(`${config.endpoint}/mcp-events`);
-
-      return new Promise((resolve) => {
-        this.eventSource!.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            const server: McpServer = {
-              ...config,
-              name: data.name,
-              version: data.version,
-              status: 'connected' as ServerStatus,
-              lastSeen: new Date(),
-              lastHeartbeat: Date.now(),
-              capabilities: data.capabilities,
-              config: {
-                ...config,
-                protocol: 'sse' as const,
-                command: config.command || 'node',
-                args: config.args || [],
-                env: config.env || {}
-              }
-            };
-
-            // 使用 process.nextTick 来避免未处理的错误
-            process.nextTick(() => {
-              try {
-                this.emit('connected', data);
-              } catch (error) {
-                console.error('Error emitting connected event:', error);
-              }
-            });
-
-            resolve(server);
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            resolve(this.handleError(`JSON parse error: ${errorMessage}`));
-          }
+      const response = await axios.get(`${config.endpoint}/info`);
+      if (response.status === 200) {
+        // 初始化 SSE 连接
+        this.setupEventSource(config.endpoint);
+        
+        return {
+          id: config.id,
+          name: response.data.name || config.id,
+          protocol: 'sse',
+          version: response.data.version || '1.0.0',
+          status: 'connected',
+          lastSeen: Date.now(),
+          lastHeartbeat: Date.now(),
+          capabilities: response.data.capabilities || {
+            tools: [],
+            resources: [],
+            resourceTemplates: [],
+            includes: (capability: string) => false
+          },
+          config
         };
-
-        this.eventSource!.onerror = (err) => {
-          const errorMessage = err instanceof Error ? err.message : 'Connection failed';
-          resolve(this.handleError(`SSE connection failed: ${errorMessage}`));
-        };
-      });
+      }
+      return null;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return this.handleError(`SSE initialization error: ${errorMessage}`);
+      this.logger.error(`Failed to discover server ${config.id}: ${error.message}`);
+      return null;
     }
+  }
+
+  private setupEventSource(endpoint: string): void {
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+
+    this.eventSource = new EventSource(`${endpoint}/events`);
+
+    this.eventSource.onopen = () => {
+      this.logger.log('SSE connection established');
+    };
+
+    this.eventSource.onerror = (error) => {
+      this.logger.error('SSE connection error:', error);
+    };
+
+    this.eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.emit('message', data);
+      } catch (error) {
+        this.logger.error('Failed to parse SSE message:', error);
+      }
+    };
   }
 
   async checkHeartbeat(server: McpServer): Promise<boolean> {
     try {
-      const response = await fetch(`${server.config.endpoint}/health`);
-      return response.ok;
-    } catch {
+      const response = await axios.get(`${server.config.endpoint}/health`);
+      return response.status === 200;
+    } catch (error) {
       return false;
     }
   }
 
-  on(event: 'connected' | 'error', listener: (...args: any[]) => void): this {
-    return super.on(event, listener);
+  async executeTask(server: McpServer, task: WorkflowTaskDto): Promise<any> {
+    try {
+      const response = await axios.post(`${server.config.endpoint}/tasks`, task, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: task.timeout || 30000
+      });
+
+      if (response.status >= 200 && response.status < 300) {
+        return new Promise((resolve, reject) => {
+          const taskId = response.data.taskId;
+          const timeout = setTimeout(() => {
+            reject(new Error(`Task execution timed out after ${task.timeout || 30000}ms`));
+          }, task.timeout || 30000);
+
+          const messageHandler = (data: any) => {
+            if (data.taskId === taskId) {
+              if (data.status === 'completed') {
+                clearTimeout(timeout);
+                this.removeListener('message', messageHandler);
+                resolve(data.result);
+              } else if (data.status === 'failed') {
+                clearTimeout(timeout);
+                this.removeListener('message', messageHandler);
+                reject(new Error(data.error));
+              }
+            }
+          };
+
+          this.on('message', messageHandler);
+        });
+      } else {
+        throw new Error(`Task execution failed with status ${response.status}`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to execute task on server ${server.id}: ${error.message}`);
+      throw error;
+    }
   }
 }

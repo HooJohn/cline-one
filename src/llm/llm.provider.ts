@@ -15,18 +15,20 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1秒
 
 @Injectable()
-export class DeepseekProvider implements LlmProvider {
+export class LLMAdapter implements LlmProvider {
   private readonly apiKey: string;
   private readonly apiBase: string;
   private readonly model: string;
+  private readonly provider: string;
   private readonly httpsAgent: https.Agent;
   
   constructor(
     private readonly configService: ConfigService
   ) {
-    this.apiKey = this.configService.get<string>('deepseek.apiKey');
-    this.apiBase = this.configService.get<string>('deepseek.apiBase');
-    this.model = this.configService.get<string>('deepseek.model');
+    this.provider = this.configService.get<string>('LLM_PROVIDER') || 'deepseek';
+    this.apiKey = this.configService.get<string>(`${this.provider}.apiKey`);
+    this.apiBase = this.configService.get<string>(`${this.provider}.apiBase`);
+    this.model = this.configService.get<string>(`${this.provider}.model`);
 
     // 增强配置验证
     this.validateConfiguration();
@@ -38,10 +40,10 @@ export class DeepseekProvider implements LlmProvider {
       timeout: 60000,
     });
 
-    console.log('当前Deepseek配置:', {
+    console.log(`当前${this.provider}配置:`, {
       apiBase: this.apiBase,
       model: this.model,
-      apiKey: this.apiKey?.substring(0, 6) + '...' // 安全显示前6位
+      apiKey: this.apiKey?.substring(0, 6) + '...'
     });
   }
 
@@ -49,13 +51,13 @@ export class DeepseekProvider implements LlmProvider {
     const configErrors: string[] = [];
 
     if (!this.apiKey) {
-      configErrors.push('Missing Deepseek API Key');
+      configErrors.push(`Missing ${this.provider} API Key`);
     } else if (this.apiKey.length < 32) {
-      configErrors.push('Invalid Deepseek API Key format');
+      configErrors.push(`Invalid ${this.provider} API Key format`);
     }
 
     if (!this.apiBase) {
-      configErrors.push('Missing Deepseek API Base URL');
+      configErrors.push(`Missing ${this.provider} API Base URL`);
     } else {
       try {
         new URL(this.apiBase);
@@ -65,7 +67,7 @@ export class DeepseekProvider implements LlmProvider {
     }
 
     if (!this.model) {
-      configErrors.push('Missing Deepseek Model configuration');
+      configErrors.push(`Missing ${this.provider} Model configuration`);
     }
 
     if (configErrors.length > 0) {
@@ -163,8 +165,9 @@ export class DeepseekProvider implements LlmProvider {
 
   getModelInfo() {
     return {
-      name: 'Deepseek',
-      version: this.model
+      name: this.provider,
+      version: this.model,
+      apiBase: this.apiBase
     };
   }
 }

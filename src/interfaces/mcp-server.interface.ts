@@ -14,8 +14,20 @@ export interface McpServerConfig {
 
 import { EventEmitter } from 'events';
 import { WebSocket } from 'ws';
-import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto';
-import type { ProtocolAdapter } from '../protocol/protocol-adapters.type';
+import { WorkflowTaskDto } from '../orchestration/dto/workflow-task.dto';
+import type { ProtocolAdapter } from '../mcp-gateway/protocol/protocol-adapters.type';
+
+export interface ServerMetrics {
+  cpuUsage: number;
+  memoryUsage: number;
+  avgLatency: number;
+  errorRate: number;
+  errorCount: number;
+  totalTasks: number;
+  lastTaskTime?: number;
+  lastUpdated: number;
+  taskQueueSize: number;
+}
 
 export interface McpServer {
   id: string;
@@ -23,11 +35,14 @@ export interface McpServer {
   protocol: 'http' | 'stdio' | 'ws' | 'sse';
   version: string;
   status: ServerStatus;
-  lastSeen: Date;
+  lastSeen: number;
   lastHeartbeat: number;
   connection?: WebSocket;
-  capabilities: ServerCapabilities & { includes: (capability: string) => boolean };
+  capabilities: ServerCapabilities & { 
+    includes: (capability: string) => boolean 
+  };
   config: McpServerConfig;
+  metrics?: ServerMetrics;
 }
 
 export interface ServerCapabilities {
@@ -41,21 +56,7 @@ export interface McpDiscoveryService {
   executeTaskOnWorker(workerId: string, task: WorkflowTaskDto): Promise<any>;
 }
 
-export interface McpServer {
-  id: string;
-  name: string;
-  protocol: 'http' | 'stdio' | 'ws' | 'sse';
-  version: string;
-  status: ServerStatus;
-  lastSeen: Date;
-  lastHeartbeat: number;
-  connection?: WebSocket;
-  capabilities: ServerCapabilities & { includes: (capability: string) => boolean };
-  config: McpServerConfig;
-}
-
 export interface McpWorker extends McpServer {
   currentLoad: number;
   capacity: number;
-  taskQueueSize: number;
 }

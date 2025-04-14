@@ -1,8 +1,9 @@
 import { WebSocketServer } from 'ws';
 import type { WebSocketAdapterConfig } from './protocol-adapters.type';
-import { McpServer, ServerStatus } from '../interfaces/mcp-server.interface';
+import { McpServer, ServerStatus } from '../../interfaces/mcp-server.interface';
 import type { ProtocolAdapter } from './protocol-adapters.type';
 import { EventEmitter } from 'events';
+import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto';
 
 export class WebSocketAdapter extends EventEmitter implements ProtocolAdapter {
   private wss: WebSocketServer | null = null;
@@ -21,12 +22,12 @@ export class WebSocketAdapter extends EventEmitter implements ProtocolAdapter {
       
       this.wss.on('connection', (ws) => {
         const server: McpServer = {
-          id: `ws:${this.config.port}`,
+          id: this.config.id,
           name: 'WebSocket Server',
           protocol: 'ws',
           version: '1.0.0',
           status: 'connected',
-          lastSeen: new Date(),
+          lastSeen: Date.now(),
           lastHeartbeat: Date.now(),
           connection: ws,
           config: this.config,
@@ -50,7 +51,7 @@ export class WebSocketAdapter extends EventEmitter implements ProtocolAdapter {
         protocol: 'ws',
         version: '1.0.0',
         status: 'connected',
-        lastSeen: new Date(),
+        lastSeen: Date.now(),
         lastHeartbeat: Date.now(),
         connection: null,
         config: this.config,
@@ -69,6 +70,47 @@ export class WebSocketAdapter extends EventEmitter implements ProtocolAdapter {
 
   async checkHeartbeat(server: McpServer): Promise<boolean> {
     return server.connection?.readyState === WebSocket.OPEN;
+  }
+
+  async executeTask(server: McpServer, task: WorkflowTaskDto): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if (!server.connection || server.connection.readyState !== WebSocket.OPEN) {
+        reject(new Error('Server connection is not open'));
+        return;
+      }
+
+      const taskId = Date.now().toString();
+      const messageHandler = (data: Buffer) => {
+        try {
+          const response = JSON.parse(data.toString());
+          if (response.taskId === taskId) {
+            server.connection.removeListener('message', messageHandler);
+            if (response.status === 'completed') {
+              resolve(response.result);
+            } else {
+              reject(new Error(response.error || 'Task execution failed'));
+            }
+          }
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      server.connection.on('message', messageHandler);
+
+      const timeout = setTimeout(() => {
+        server.connection.removeListener('message', messageHandler);
+        reject(new Error(`Task execution timed out after ${task.timeout || 30000}ms`));
+      }, task.timeout || 30000);
+
+      try {
+        server.connection.send(JSON.stringify({ taskId, ...task }));
+      } catch (error) {
+        clearTimeout(timeout);
+        server.connection.removeListener('message', messageHandler);
+        reject(error);
+      }
+    });
   }
 
   private handleDisconnect(server: McpServer) {

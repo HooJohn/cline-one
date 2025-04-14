@@ -22,6 +22,14 @@ export class RoutingPolicyDto {
   decisionLogic: Record<string, any>;
 
   @ApiProperty({
+    description: '负载均衡策略类型',
+    enum: ['round-robin', 'random', 'weighted', 'least-connections', 'latency-based', 'resource-based']
+  })
+  @IsNotEmpty()
+  @IsString()
+  policyType: string;
+
+  @ApiProperty({
     description: '适用的执行计划版本',
     example: '1.0.0'
   })
