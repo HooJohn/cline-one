@@ -18,11 +18,13 @@ export class TaskSchedulerService {
       attempts: this.configService.get('TASK_MAX_RETRIES') || 3
     };
     
-    return this.taskQueue.add('process', { id: taskId, ...payload }, options);
+    // 使用 'main' 作为作业名称以匹配处理器
+    return this.taskQueue.add('main', { id: taskId, ...payload }, options);
   }
 
   async scheduleDelayedTask(taskId: string, delayMs: number, payload: any): Promise<Job> {
-    return this.taskQueue.add('delayedTask', 
+    // 使用 'main' 作为作业名称以匹配处理器
+    return this.taskQueue.add('main', 
       { id: taskId, ...payload }, 
       { 
         delay: delayMs,
@@ -37,11 +39,6 @@ export class TaskSchedulerService {
       return 'not_found';
     }
     return job.getState();
-  }
-
-  async executeTask(taskId: string, payload: any) {
-    console.log(`Executing task ${taskId} with payload:`, payload);
-    return { taskId, status: 'processed' };
   }
 
   private calculatePriority(task: any): number {

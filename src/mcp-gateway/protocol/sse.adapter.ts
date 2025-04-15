@@ -16,7 +16,7 @@ export class SseAdapter extends EventEmitter implements ProtocolAdapter {
       const response = await axios.get(`${config.endpoint}/info`);
       if (response.status === 200) {
         // 初始化 SSE 连接
-        this.setupEventSource(config.endpoint);
+        this.setupEventSource(config.endpoint || '');
         
         return {
           id: config.id,
@@ -36,8 +36,9 @@ export class SseAdapter extends EventEmitter implements ProtocolAdapter {
         };
       }
       return null;
-    } catch (error) {
-      this.logger.error(`Failed to discover server ${config.id}: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to discover server ${config.id}: ${errorMessage}`);
       return null;
     }
   }
@@ -111,8 +112,9 @@ export class SseAdapter extends EventEmitter implements ProtocolAdapter {
       } else {
         throw new Error(`Task execution failed with status ${response.status}`);
       }
-    } catch (error) {
-      this.logger.error(`Failed to execute task on server ${server.id}: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to execute task on server ${server.id}: ${errorMessage}`);
       throw error;
     }
   }

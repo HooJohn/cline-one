@@ -1,18 +1,19 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { Module, forwardRef } from '@nestjs/common';
 import { LlmAdapterService } from './llm-adapter.service';
-import { LLMAdapter } from './llm.provider';
+import { LlmRouterService } from './llm-router.service';
+import { DeepseekProvider } from './providers/deepseek.provider';
+import { CoreModule } from '../core/core.module';
 
 @Module({
-  imports: [],
-  providers: [
-    LLMAdapter,
-    {
-      provide: 'LLM_PROVIDER',
-      useExisting: LLMAdapter
-    },
-    LlmAdapterService
+  imports: [
+    forwardRef(() => CoreModule), // 使用forwardRef解决循环依赖
   ],
-  exports: [LlmAdapterService, LLMAdapter, 'LLM_PROVIDER']
+  providers: [
+    LlmAdapterService,
+    LlmRouterService,
+    DeepseekProvider
+    // 移除重复的EncryptionService，使用CoreModule导出的实例
+  ],
+  exports: [LlmAdapterService],
 })
 export class LlmModule {}

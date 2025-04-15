@@ -4,31 +4,36 @@
     "paths": {
       "@common/*": ["src/core/common/*"],
       "@core/*": ["src/core/*"],
-      "@mcp/*": ["src/mcp-gateway/*"]
+      "@mcp/*": ["src/mcp-gateway/*"],
+      "@interfaces/*": ["src/interfaces/*"],
+      "@llm/*": ["src/llm/*"],
+      "@node-adapter/*": ["src/node-adapter/*"]
     },
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "target": "es2017",
+    "target": "es2020",
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
-    "paths": {
-      "@common/*": ["src/common/*"],
-      "@core/*": ["src/core/*"],
-      "@interfaces/*": ["src/interfaces/*"],
-      "@llm/*": ["src/llm/*"],
-      "@node-adapter/*": ["src/node-adapter/*"]
-    },
     "incremental": true,
     "skipLibCheck": true,
-    "strictNullChecks": false,
-    "noImplicitAny": false,
-    "strictBindCallApply": false,
-    "forceConsistentCasingInFileNames": false,
-    "noFallthroughCasesInSwitch": false,
-    "noUnusedLocals": false
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "strictFunctionTypes": true,
+    "strictPropertyInitialization": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true
   },
   "exclude": ["node_modules", "dist"]
 }

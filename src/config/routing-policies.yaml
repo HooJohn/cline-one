@@ -1,0 +1,19 @@
+# 路由策略配置
+servers:
+  - id: local-main
+    endpoint: "http://localhost:3000"
+    protocol: http
+  - id: backup-node 
+    endpoint: "http://backup-server:3000"
+    protocol: http
+
+routingRules:
+  - pattern: "^/api/v1/.*"
+    priority: 1
+    targetServers: 
+      - "local-main"
+      - "backup-node"
+    rateLimit:
+      windowMs: 60000
+      max: 100
+      queueEnabled: true

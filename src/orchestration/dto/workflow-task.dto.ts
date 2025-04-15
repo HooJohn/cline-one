@@ -19,7 +19,7 @@ import { RoutingPolicyDto } from './routing-policy.dto';
 export class WorkflowTaskDto {
   @ApiProperty({ description: 'Unique task identifier' })
   @IsNotEmpty()
-  taskId: string;
+  taskId: string = '';
 
   @ApiProperty({ 
     description: 'Associated chat ID',
@@ -30,7 +30,7 @@ export class WorkflowTaskDto {
 
   @ApiProperty({ description: 'Task type' })
   @IsNotEmpty()
-  type: string;
+  type: string = 'workflow';
 
   @ApiProperty({ description: 'Task payload' })
   @IsNotEmpty()
@@ -41,24 +41,24 @@ export class WorkflowTaskDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AnalyzeDataRelationsDto)
-  dataSources: AnalyzeDataRelationsDto[];
+  dataSources: AnalyzeDataRelationsDto[] = [];
 
   @ApiProperty({ 
     enum: ModelIntegrationType,
     description: 'LLM integration type required' 
   })
   @IsEnum(ModelIntegrationType)
-  modelType: ModelIntegrationType;
+  modelType: ModelIntegrationType = ModelIntegrationType.DEEPSEEK;
 
   @ApiProperty({ description: 'Task priority (1-5)' })
   @IsInt()
   @Min(1)
   @Max(5)
-  priority: number;
+  priority: number = 1;
 
   @ApiProperty({ description: 'Estimated resource requirements' })
   @IsObject()
-  resourceEstimate: Record<string, number>;
+  resourceEstimate: Record<string, number> = {};
 
   @ApiProperty({ 
     description: 'Task timeout in milliseconds',
@@ -74,7 +74,13 @@ export class WorkflowTaskDto {
   })
   @ValidateNested()
   @Type(() => RetryPolicy)
-  retryPolicy: RetryPolicy;
+  retryPolicy: RetryPolicy = {
+    maxAttempts: 3,
+    delay: 1000,
+    backoffFactor: 2,
+    maxDelay: 10000,
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', '5xx']
+  };
 
   @ApiProperty({
     description: 'Routing policy configuration',

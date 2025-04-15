@@ -1,16 +1,60 @@
 import { EventEmitter } from 'events';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import { McpServer, McpServerConfig, ServerStatus } from '../../interfaces/mcp-server.interface';
 import { ProtocolAdapter } from './protocol-adapters.type';
 import { WorkflowTaskDto } from '../../orchestration/dto/workflow-task.dto';
 import axios from 'axios';
+import { EncryptionService } from '../../core/services/encryption.service';
 
 @Injectable()
 export class HttpAdapter extends EventEmitter implements ProtocolAdapter {
   private readonly logger = new Logger(HttpAdapter.name);
+  private readonly sharedSecret: string | undefined;
+  private readonly httpTimeout: number;
 
-  constructor(private readonly port: number) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly encryptionService: EncryptionService
+  ) {
     super();
+    
+    // 验证并记录HTTP配置
+    const httpPort = this.configService.get<number>('MCP_HTTP_PORT', 3000);
+    this.httpTimeout = this.configService.get<number>('MCP_HTTP_TIMEOUT', 30000);
+    const maxPayloadSize = this.configService.get<string>('MCP_HTTP_MAX_PAYLOAD_SIZE', '10mb');
+    
+    this.logger.log(`HTTP Adapter 配置加载成功：
+    - MCP端口: ${httpPort}
+    - 超时: ${this.httpTimeout}ms
+    - 最大负载: ${maxPayloadSize}`);
+
+    // 从MCP配置获取共享密钥
+    const encryptedSecret = this.configService.get<string>('MCP_SHARED_SECRET');
+    if (!encryptedSecret) {
+      throw new Error('MCP_SHARED_SECRET必须配置在环境变量中');
+    }
+    this.sharedSecret = this.encryptionService.decrypt(encryptedSecret);
+    this.logger.log(`HMAC请求签名已启用，密钥长度: ${this.sharedSecret?.length || 0}字节`);
+    
+    // 初始化事件监听
+    this.on('error', (err) => 
+      this.logger.error(`Protocol adapter error: ${err.message}`, err.stack));
+  }
+
+  private _signRequest(body: string): { signature: string; timestamp: string; nonce: string } | null {
+    if (!this.sharedSecret) {
+      return null; // Signing disabled if secret is not configured
+    }
+    const timestamp = Date.now().toString();
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const dataToSign = `${timestamp}.${nonce}.${body}`;
+    const signature = crypto
+      .createHmac('sha256', this.sharedSecret)
+      .update(dataToSign)
+      .digest('hex');
+    return { signature, timestamp, nonce };
   }
 
   private handleError(message: string): null {
@@ -25,8 +69,23 @@ export class HttpAdapter extends EventEmitter implements ProtocolAdapter {
   }
 
   async discover(config: McpServerConfig): Promise<McpServer | null> {
+    // Validate config first
+    if (!config?.endpoint) {
+      this.logger.error(`Missing endpoint in server config for ${config?.id || 'unknown'}`);
+      return this.handleError('Server config missing endpoint');
+    }
+    
+    // Validate URL format
     try {
-      const response = await axios.get(`${config.endpoint}/health`, {
+      new URL(config.endpoint);
+    } catch (error) {
+      this.logger.error(`Invalid endpoint URL format: ${config.endpoint}`);
+      return this.handleError(`Invalid URL: ${config.endpoint}`);
+    }
+
+    try {
+      const healthUrl = `${config.endpoint}/health`.replace(/([^:]\/)\/+/g, '$1');
+      const response = await axios.get(healthUrl, {
         timeout: 5000,
         validateStatus: () => true
       });
@@ -92,13 +151,27 @@ export class HttpAdapter extends EventEmitter implements ProtocolAdapter {
   }
 
   async executeTask(server: McpServer, task: WorkflowTaskDto): Promise<any> {
+    const requestBody = JSON.stringify(task);
+    const signatureData = this._signRequest(requestBody);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (signatureData) {
+      headers['X-Signature-Timestamp'] = signatureData.timestamp;
+      headers['X-Signature-Nonce'] = signatureData.nonce;
+      headers['X-Signature'] = signatureData.signature;
+      this.logger.debug(`Sending request to ${server.id} with HMAC signature.`);
+    } else {
+       this.logger.debug(`Sending request to ${server.id} without HMAC signature (secret not configured).`);
+    }
+
     try {
-      const response = await axios.post(`${server.config.endpoint}/tasks`, task, {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: task.timeout || 30000,
-        validateStatus: () => true
+      const response = await axios.post(`${server.config.endpoint}/tasks`, requestBody, {
+        headers: headers,
+        timeout: task.timeout || this.httpTimeout,
+        validateStatus: () => true, // Handle status validation below
       });
 
       // Validate response status

@@ -6,7 +6,7 @@ import type { McpServerConfig } from '../../interfaces/mcp-server.interface';
 @Injectable()
 export class McpConfigService {
   get httpPort(): number {
-    return parseInt(process.env.MCP_HTTP_PORT || '3000', 10);
+    return parseInt(process.env['MCP_HTTP_PORT'] || '3000', 10);
   }
   private readonly logger = new Logger(McpConfigService.name);
   private readonly configPath = join(process.cwd(), '.mcpconfig');
@@ -14,7 +14,7 @@ export class McpConfigService {
 
   constructor() {
     this.loadConfig();
-    this.setupFileWatch();
+    this.setupFileWatch()
   }
 
   private loadConfig(): void {
@@ -27,8 +27,9 @@ export class McpConfigService {
         disabled: s.disabled || false
       }));
       this.logger.log('Successfully loaded MCP server configurations');
-    } catch (error) {
-      this.logger.error(`Failed to load MCP config: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to load MCP config: ${errorMessage}`);
       this.servers = [];
     }
   }

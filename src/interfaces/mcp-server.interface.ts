@@ -10,6 +10,7 @@ export interface McpServerConfig {
   args?: string[];
   env?: Record<string, string>;
   autoApprove?: string[];
+  workingDir?: string;
 }
 
 import { EventEmitter } from 'events';

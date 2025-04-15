@@ -1,16 +1,16 @@
 import { Controller, Post, Body } from '@nestjs/common';
-import { RedisService } from './data-relation.service';
+import { DataRelationService } from './data-relation.service';
 import { AnalyzeDataRelationsDto } from './dto/data-relation.dto';
 
 @Controller('data-relation')
 export class DataRelationController {
-  constructor(private readonly RedisService: RedisService) {}
+  constructor(private readonly DataRelationService: DataRelationService) {}
 
   @Post('analyze')
   async analyzeRelations(@Body() dto: AnalyzeDataRelationsDto) {
     try {
       const startTime = Date.now();
-      const result = await this.RedisService.analyzeCrossSourceRelations(dto.sources);
+      const result = await this.DataRelationService.analyzeCrossSourceRelations(dto.sources);
       const duration = Date.now() - startTime;
       
       return {
@@ -26,7 +26,7 @@ export class DataRelationController {
       return {
         status: 'error',
         errorCode: 'RELATION_ANALYSIS_FAILED',
-        message: error.message,
+        message: error instanceof Error ? error.message : String(error),
         details: {
           failedSources: dto.sources,
           timestamp: new Date().toISOString()

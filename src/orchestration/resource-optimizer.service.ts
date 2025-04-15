@@ -8,7 +8,7 @@ import * as osUtils from 'os-utils';
 import { ConfigService } from '@nestjs/config';
 import { TaskSchedulerService } from '../task-queue/task-scheduler.service';
 import { Registry } from 'prom-client';
-import { RedisService } from '../core/data-relation.service';
+import { RedisService } from '../core/redis.service';
 
 // Define a more detailed health status or score
 interface WorkerHealthInfo {
@@ -59,13 +59,12 @@ export class ResourceOptimizerService {
   async cacheOptimizationPlan(plan: any): Promise<void> {
     await this.redisService.set(
       `optimization:${plan.timestamp}`,
-      JSON.stringify(plan),
-      3600 // 缓存1小时
+      JSON.stringify(plan)
     );
   }
   private readonly registry = new Registry();
   private readonly logger = new Logger(ResourceOptimizerService.name);
-  private monitoringInterval: NodeJS.Timeout;
+  private monitoringInterval: NodeJS.Timeout | null = null;
   private systemMetricsHistory: SystemMetrics[] = [];
 
   constructor(
@@ -136,7 +135,7 @@ export class ResourceOptimizerService {
     let estimatedTokens = 0;
     if (task.modelType) { // Check if it's an LLM task
         // Example: Rough estimate based on priority or resource estimate?
-        estimatedTokens = (task.resourceEstimate?.promptLength || 1000) * (task.priority || 1); 
+        estimatedTokens = (task.resourceEstimate['promptLength'] || 1000) * (task.priority || 1); 
     }
 
     // TODO: Implement actual cost prediction logic, potentially calling llmAdapter.estimateCost(task)
@@ -238,8 +237,8 @@ export class ResourceOptimizerService {
         const metrics = await this.collectMetrics();
         this.systemMetricsHistory.push(metrics);
         this.adjustResourcesBasedOnMetrics(metrics);
-      } catch (error) {
-        this.logger.error(`资源监控出错: ${error.message}`);
+      } catch (error: unknown) {
+        this.logger.error(`资源监控出错: ${error instanceof Error ? error.message : String(error)}`);
       }
     }, interval);
   }

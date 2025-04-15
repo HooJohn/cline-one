@@ -1,10 +1,12 @@
 import { Process, Processor, OnQueueActive, OnQueueCompleted, OnQueueFailed } from '@nestjs/bull';
 import { Job } from 'bull';
 import { Logger, Injectable, UnprocessableEntityException, InternalServerErrorException } from '@nestjs/common';
+import { v4 as uuidv4 } from 'uuid';
 import { McpDiscoveryService } from '../mcp-gateway/discovery/mcp-discovery.service';
 import { WorkflowTaskDto } from '../orchestration/dto/workflow-task.dto';
 import { ConfigService } from '@nestjs/config';
 import { RetryPolicy } from '../core/dto/retry-policy.dto';
+import { RedisService } from '../core/redis.service';
 
 // 自定义错误类
 export class ValidationError extends Error {
@@ -35,32 +37,33 @@ export class TaskQueueProcessor {
 
   constructor(
     private readonly mcpDiscovery: McpDiscoveryService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly redisService: RedisService
   ) {}
 
   @Process('main')
   async handleTask(job: Job<WorkflowTaskDto>) {
-    const { createClient } = require('redis');
-    const redisClient = createClient({
-      url: process.env.REDIS_URL,
-      database: job.data.chatId ? 1 : 0
-    });
-    await redisClient.connect();
-
     try {
-      this.logger.log(`启动任务处理 [任务ID: ${job.data.taskId}]`, {
+      if (!job.id) {
+        job.id = uuidv4(); // 生成唯一任务ID
+        this.logger.debug(`生成新任务ID: ${job.id}`);
+      }
+      
+      this.logger.log(`启动任务处理 [队列ID: ${job.id}]`, {
         jobId: job.id.toString(),
         taskId: job.data.taskId,
-        type: job.data.type
+        type: job.data.type,
+        bullId: job.id  // 添加bullId字段
       });
 
       // 存储聊天上下文元数据
       if (job.data.chatId) {
-        await redisClient.hSet(`chat:${job.data.chatId}:context`, {
+        const contextKey = `chat:${job.data.chatId}:context`;
+        await this.redisService.set(contextKey, JSON.stringify({
           createdAt: new Date().toISOString(),
           lastActivity: new Date().toISOString(),
-          taskCount: await redisClient.incr(`chat:${job.data.chatId}:task_counter`)
-        });
+          taskCount: parseInt(await this.redisService.get(`chat:${job.data.chatId}:task_counter`) || '0') + 1
+        }));
       }
 
       await this.validateTask(job.data);
@@ -68,7 +71,10 @@ export class TaskQueueProcessor {
       
       // 更新上下文最后活动时间
       if (job.data.chatId) {
-        await redisClient.hSet(`chat:${job.data.chatId}:context`, 'lastActivity', new Date().toISOString());
+        const contextKey = `chat:${job.data.chatId}:context`;
+        const context = JSON.parse(await this.redisService.get(contextKey) || '{}');
+        context.lastActivity = new Date().toISOString();
+        await this.redisService.set(contextKey, JSON.stringify(context));
       }
       
       return result;
@@ -81,48 +87,51 @@ export class TaskQueueProcessor {
         await this.handleWorkerUnavailable(job);
         throw error;
       } else {
-        this.logger.error(`任务执行失败 [任务ID: ${job.data.taskId}]: ${error.message}`, error.stack);
-        throw new InternalServerErrorException(error.message);
+        this.logger.error(`任务执行失败 [任务ID: ${job.data.taskId}]: ${error instanceof Error ? error.message : '未知错误'}`, error instanceof Error ? error.stack : undefined);
+        throw new InternalServerErrorException(error instanceof Error ? error.message : '未知错误');
       }
     }
   }
 
   @OnQueueActive()
   async onActive(job: Job<WorkflowTaskDto>) {
-    this.logger.log(`任务开始处理 [任务ID: ${job.data.taskId}]`, {
-      jobId: job.id.toString(),
-      taskId: job.data.taskId,
-      timestamp: new Date().toISOString()
-    });
+      this.logger.log(`任务开始处理 [队列ID: ${job.id}]`, {
+        jobId: job.id.toString(),
+        taskId: job.data.taskId,
+        bullId: job.id,
+        timestamp: new Date().toISOString()
+      });
     await this.updateTaskStatus(job.id.toString(), 'active');
   }
 
   @OnQueueCompleted()
   async onCompleted(job: Job<WorkflowTaskDto>, result: any) {
-    this.logger.log(`任务处理完成 [任务ID: ${job.data.taskId}]`, {
-      jobId: job.id.toString(),
-      taskId: job.data.taskId,
-      result,
-      timestamp: new Date().toISOString()
-    });
+      this.logger.log(`任务处理完成 [队列ID: ${job.id}]`, {
+        jobId: job.id.toString(),
+        taskId: job.data.taskId,
+        bullId: job.id,
+        result,
+        timestamp: new Date().toISOString()
+      });
     await this.updateTaskStatus(job.id.toString(), 'completed', result);
   }
 
   @OnQueueFailed()
   async onFailed(job: Job<WorkflowTaskDto>, error: Error) {
-    this.logger.error(`任务处理失败：任务ID: ${job.data.taskId}`, {
-      jobId: job.id.toString(),
-      taskId: job.data.taskId,
-      error: error.message,
-      stack: error.stack,
-      timestamp: new Date().toISOString()
-    });
+      this.logger.error(`任务处理失败 [队列ID: ${job.id}]`, {
+        jobId: job.id.toString(),
+        taskId: job.data.taskId,
+        bullId: job.id,
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
     await this.updateTaskStatus(job.id.toString(), 'failed', null, error);
   }
 
   private async validateTask(task: WorkflowTaskDto): Promise<void> {
     if (!task.taskId) {
-      throw new ValidationError('任务ID不能为空');
+      throw new ValidationError('业务任务ID不能为空');
     }
     if (!task.type) {
       throw new ValidationError('任务类型不能为空');
@@ -172,7 +181,7 @@ export class TaskQueueProcessor {
           this.logger.error(`任务重试次数已达上限 [任务ID: ${job.data.taskId}]`, {
             jobId: job.id.toString(),
             taskId: job.data.taskId,
-            error: error.message,
+            error: error instanceof Error ? error.message : '未知错误',
             attempts
           });
           throw error;
@@ -181,7 +190,7 @@ export class TaskQueueProcessor {
         this.logger.warn(`任务执行失败，准备重试 [任务ID: ${job.data.taskId}]`, {
           jobId: job.id.toString(),
           taskId: job.data.taskId,
-          error: error.message,
+          error: error instanceof Error ? error.message : '未知错误',
           attempt: attempts,
           nextRetryDelay: delay
         });
@@ -209,17 +218,16 @@ export class TaskQueueProcessor {
     error?: Error
   ) {
     try {
-      // 这里可以实现任务状态更新的具体逻辑
-      // 例如：更新数据库、发送通知等
-      this.logger.debug(`更新任务状态 [任务ID: ${jobId}]: ${status}`, {
+      const taskKey = `task:${jobId}:status`; // 保持使用BullMQ的jobId作为Redis key
+      await this.redisService.set(taskKey, JSON.stringify({
         jobId,
         status,
         result,
         error: error?.message,
         timestamp: new Date().toISOString()
-      });
+      }));
     } catch (error) {
-      this.logger.error(`更新任务状态失败 [任务ID: ${jobId}]: ${error.message}`, error.stack);
+      this.logger.warn(`Redis操作失败，但继续处理任务: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

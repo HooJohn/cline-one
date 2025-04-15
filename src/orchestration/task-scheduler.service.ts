@@ -6,6 +6,8 @@ import { WorkflowTaskDto } from './dto/workflow-task.dto';
 import { RetryPolicy } from '../core/dto/retry-policy.dto';
 import { McpServer } from '../interfaces/mcp-server.interface';
 import { ConfigService } from '@nestjs/config';
+import { RedisService } from '../core/redis.service';
+
 
 interface ActiveTaskInfo {
   timeoutHandle: NodeJS.Timeout;
@@ -110,8 +112,10 @@ export class TaskSchedulerService implements OnModuleInit {
           // this.handleTaskFailure(task, worker, err);
         });
       }
-    } catch (error) {
-      this.logger.error(`Error during queue processing loop: ${error.message}`, error.stack);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Error during queue processing loop: ${errorMessage}`, errorStack);
     } finally {
       this.isProcessing = false;
       this.logger.debug('Finished processing cycle.');
@@ -178,7 +182,7 @@ export class TaskSchedulerService implements OnModuleInit {
       this.handleTaskSuccess(taskId, workerId, result);
     } catch (error) {
       // Task failed after retries or due to non-retryable error
-      this.handleTaskFailure(taskId, workerId, error);
+      this.handleTaskFailure(taskId, workerId, error as Error);
     } finally {
       // Ensure timeout is cleared and task is removed from active map
       // This might run before or after handleSuccess/handleFailure/handleTimeout
@@ -213,8 +217,9 @@ export class TaskSchedulerService implements OnModuleInit {
       try {
         this.logger.debug(`Task ${taskId}: Attempt ${attempts}/${policy.maxAttempts}`);
         return await fn();
-      } catch (error) {
-        this.logger.warn(`Task ${taskId}: Attempt ${attempts} failed: ${error.message}`);
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Task ${taskId}: Attempt ${attempts} failed: ${errorMessage}`);
         if (attempts >= policy.maxAttempts) {
           this.logger.error(`Task ${taskId}: Max retry attempts (${policy.maxAttempts}) exceeded.`);
           throw error; // Rethrow after max attempts

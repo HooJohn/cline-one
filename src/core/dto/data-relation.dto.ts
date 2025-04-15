@@ -3,5 +3,5 @@ export class AnalyzeDataRelationsDto {
     mcpServer: string;
     resourceUri: string; 
     dataType: 'mongodb' | 'mysql' | 'erp';
-  }>;
+  }> = [];
 }

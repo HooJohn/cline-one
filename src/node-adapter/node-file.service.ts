@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnApplicationShutdown } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { FileService } from '@interfaces/file-service.interface';
@@ -6,17 +6,28 @@ import { FileStat, FileType } from '@core/enums/file-type.enum';
 import { MongoClient, GridFSBucket } from 'mongodb';
 import { ConfigService } from '@nestjs/config';
 
+export enum StorageStrategy {
+  LOCAL = 'local',
+  GRIDFS = 'gridfs'
+}
+
 @Injectable()
-export class NodeFileService implements FileService {
-  private mongoClient: MongoClient;
-  private gridFSBucket: GridFSBucket;
+export class NodeFileService implements FileService, OnModuleInit, OnApplicationShutdown {
+  private readonly logger = new Logger(NodeFileService.name);
+  private mongoClient: MongoClient | null = null;
+  private gridFSBucket: GridFSBucket | null = null;
+  private storageStrategy: StorageStrategy;
 
   constructor(private configService: ConfigService) {
-    const mongoUri = this.configService.get('MONGODB_URI') || 'mongodb://localhost:27017';
-    this.mongoClient = new MongoClient(mongoUri);
-    this.gridFSBucket = new GridFSBucket(this.mongoClient.db(), {
-      bucketName: 'chat_files'
-    });
+    this.storageStrategy = this.configService.get('FILE_STORAGE_STRATEGY') || StorageStrategy.LOCAL;
+    
+    if (this.storageStrategy === StorageStrategy.GRIDFS) {
+      const mongoUri = this.configService.get('MONGODB_URI') || 'mongodb://localhost:27017';
+      this.mongoClient = new MongoClient(mongoUri);
+      this.gridFSBucket = new GridFSBucket(this.mongoClient.db(), {
+        bucketName: 'chat_files'
+      });
+    }
   }
   
   async readFile(uri: string): Promise<string> {
@@ -30,29 +41,40 @@ export class NodeFileService implements FileService {
   }
 
   async uploadFile(file: { buffer: Buffer; originalname: string }, chatId?: string): Promise<string> {
-    // Upload to GridFS
-    const uploadStream = this.gridFSBucket.openUploadStream(file.originalname, {
-      metadata: {
-        chatId,
-        uploadedAt: new Date(),
-        size: file.buffer.length
-      }
-    });
+    if (this.storageStrategy === StorageStrategy.GRIDFS && this.gridFSBucket) {
+      try {
+        const uploadStream = this.gridFSBucket.openUploadStream(file.originalname, {
+          metadata: {
+            chatId: chatId || '',
+            uploadedAt: new Date(),
+            size: file.buffer.length
+          }
+        });
 
-    return new Promise((resolve, reject) => {
-      uploadStream.write(file.buffer);
-      uploadStream.end((error) => {
-        if (error) {
-          // Fallback to local filesystem
-          const fallbackPath = path.join(this.configService.get('FILE_UPLOAD_PATH'), file.originalname);
-          fs.writeFile(fallbackPath, file.buffer)
-            .then(() => resolve(`file://${fallbackPath}`))
-            .catch(reject);
-          return;
-        }
-        resolve(uploadStream.id.toString());
-      });
-    });
+        return new Promise((resolve, reject) => {
+          uploadStream.write(file.buffer);
+          uploadStream.end((error: Error | null) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve(uploadStream.id.toString());
+          });
+        });
+      } catch (error) {
+        this.logger.error('GridFS上传异常', error);
+        return this.uploadToLocal(file);
+      }
+    }
+    return this.uploadToLocal(file);
+  }
+
+  private async uploadToLocal(file: { buffer: Buffer; originalname: string }): Promise<string> {
+    const uploadPath = this.configService.get<string>('FILE_UPLOAD_PATH') || './uploads';
+    const fallbackPath = path.join(uploadPath, file.originalname);
+    await fs.mkdir(uploadPath, { recursive: true });
+    await fs.writeFile(fallbackPath, file.buffer);
+    return `file://${fallbackPath}`;
   }
 
   async listFiles(uri: string, recursive = false): Promise<string[]> {
@@ -85,5 +107,40 @@ export class NodeFileService implements FileService {
       mtime: stats.mtimeMs,
       size: stats.size
     };
+  }
+
+  async onModuleInit() {
+    if (this.storageStrategy === StorageStrategy.GRIDFS && !this.mongoClient) {
+      const mongoUri = this.configService.get('MONGODB_URI') || 'mongodb://localhost:27017';
+      this.mongoClient = new MongoClient(mongoUri, {
+        connectTimeoutMS: 5000,
+        socketTimeoutMS: 30000,
+        serverSelectionTimeoutMS: 5000,
+        maxPoolSize: 10
+      });
+      
+      try {
+        await this.mongoClient.connect();
+        this.gridFSBucket = new GridFSBucket(this.mongoClient.db(), {
+          bucketName: 'chat_files'
+        });
+        this.logger.log('MongoDB连接成功');
+      } catch (error) {
+        this.logger.error('MongoDB连接失败', error);
+        // 连接失败时自动回退到本地存储
+        (this as any).storageStrategy = StorageStrategy.LOCAL;
+      }
+    }
+  }
+
+  async onApplicationShutdown() {
+    if (this.mongoClient) {
+      try {
+        await this.mongoClient.close();
+        this.logger.log('MongoDB连接已关闭');
+      } catch (error) {
+        this.logger.error('关闭MongoDB连接时出错', error);
+      }
+    }
   }
 }

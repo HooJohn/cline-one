@@ -53,7 +53,7 @@ export class WebSocketAdapter extends EventEmitter implements ProtocolAdapter {
         status: 'connected',
         lastSeen: Date.now(),
         lastHeartbeat: Date.now(),
-        connection: null,
+        connection: undefined,
         config: this.config,
         capabilities: {
           tools: [],
@@ -84,7 +84,7 @@ export class WebSocketAdapter extends EventEmitter implements ProtocolAdapter {
         try {
           const response = JSON.parse(data.toString());
           if (response.taskId === taskId) {
-            server.connection.removeListener('message', messageHandler);
+            server.connection?.removeListener('message', messageHandler);
             if (response.status === 'completed') {
               resolve(response.result);
             } else {
@@ -99,15 +99,16 @@ export class WebSocketAdapter extends EventEmitter implements ProtocolAdapter {
       server.connection.on('message', messageHandler);
 
       const timeout = setTimeout(() => {
-        server.connection.removeListener('message', messageHandler);
+        server.connection?.removeListener('message', messageHandler);
         reject(new Error(`Task execution timed out after ${task.timeout || 30000}ms`));
       }, task.timeout || 30000);
 
       try {
-        server.connection.send(JSON.stringify({ taskId, ...task }));
+        const { taskId, ...taskWithoutId } = task;
+        server.connection?.send(JSON.stringify({ taskId, ...taskWithoutId }));
       } catch (error) {
         clearTimeout(timeout);
-        server.connection.removeListener('message', messageHandler);
+        server.connection?.removeListener('message', messageHandler);
         reject(error);
       }
     });

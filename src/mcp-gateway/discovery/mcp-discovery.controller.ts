@@ -2,7 +2,7 @@ import { Controller, Post, Body, Get } from '@nestjs/common';
 import { McpDiscoveryService } from './mcp-discovery.service';
 import { McpServer } from '../../interfaces/mcp-server.interface';
 
-@Controller('mcp/discovery')
+@Controller('api/v1/mcp-gateway')
 export class McpDiscoveryController {
   constructor(private readonly discoveryService: McpDiscoveryService) {}
 
@@ -11,8 +11,16 @@ export class McpDiscoveryController {
     return this.discoveryService.registerServer(server);
   }
 
-  @Get('nodes')
+  @Get('workers')
   async getRegisteredNodes() {
     return this.discoveryService.getRegisteredServers();
+  }
+
+  @Get('status')
+  async getStatus() {
+    return {
+      workers: this.discoveryService.getRegisteredServers(),
+      status: 'running'
+    };
   }
 }

@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "test:unit": "jest \"test/unit/.*\\.spec\\.ts$\"",
+    "test:integration": "jest \"test/integration/.*\\.spec\\.ts$\"",
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:mcp": "jest \"test/integration/.*mcp.*\\.spec\\.ts$\"",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test:cov": "jest --coverage",
+    "test:watch": "jest --watch",
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand"
+  }
+}

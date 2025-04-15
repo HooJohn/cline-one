@@ -2,17 +2,15 @@
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { McpGatewayModule } from '../mcp-gateway/mcp-gateway.module';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { TaskQueueProcessor } from './task-queue.processor';
 import { TaskSchedulerService } from './task-scheduler.service';
-import { ResourceOptimizerService } from '../orchestration/resource-optimizer.service';
-import { RedisService } from '../core/data-relation.service';
-import { LlmModule } from '../llm/llm.module'; // 添加LLM模块导入
+import { LlmModule } from '../llm/llm.module';
+import { RedisService } from '../core/redis.service';
 
 @Module({
   imports: [
     BullModule.forRootAsync({
-      imports: [ConfigModule],
       useFactory: async (config: ConfigService) => ({
         redis: {
           host: config.get('REDIS_HOST', 'localhost'),
@@ -31,7 +29,6 @@ import { LlmModule } from '../llm/llm.module'; // 添加LLM模块导入
       }
     }),
     McpGatewayModule,
-    ConfigModule,
     LlmModule
   ],
   providers: [
@@ -41,8 +38,7 @@ import { LlmModule } from '../llm/llm.module'; // 添加LLM模块导入
   ],
   exports: [
     BullModule,
-    TaskSchedulerService,
-    RedisService
+    TaskSchedulerService
   ]
 })
 export class TaskQueueModule {}

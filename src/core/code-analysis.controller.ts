@@ -1,9 +1,9 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Inject } from '@nestjs/common';
 import { FileService } from '@interfaces/file-service.interface';
 
 @Controller('code-analysis')
 export class CodeAnalysisController {
-  constructor(private readonly fileService: FileService) {}
+  constructor(@Inject('FileService') private readonly fileService: FileService) {}
 
   @Get('complexity')
   async cyclomaticComplexityAnalysis(@Query('path') path: string) {

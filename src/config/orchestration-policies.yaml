@@ -1,0 +1,9 @@
+# 业务流程策略
+policies:
+  - name: default-workflow
+    description: 默认业务流程策略
+    steps:
+      - name: validate-input
+        type: validation
+      - name: process-task  
+        type: execution

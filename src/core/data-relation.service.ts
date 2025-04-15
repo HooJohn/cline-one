@@ -1,83 +1,15 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { LlmAdapterService } from '../llm/llm-adapter.service';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as yaml from 'yaml';
-import { createClient } from 'redis';
 
 @Injectable()
-export class RedisService {
-  private readonly logger = new Logger(RedisService.name);
-  private templates = new Map<string, string>();
-  private client;
+export class DataRelationService {
+  private readonly logger = new Logger(DataRelationService.name);
 
   constructor(
-    @Inject('CONFIG_PATH') private readonly configPath: string,
     private readonly llmAdapter: LlmAdapterService
-  ) {
-    this.loadTemplates();
-    this.setupFileWatcher();
-    this.initializeRedisClient();
-  }
+  ) {}
 
-  private async initializeRedisClient() {
-    this.client = createClient({
-      url: process.env.REDIS_URL || 'redis://localhost:6379'
-    });
-    await this.client.connect();
-  }
-
-  async set(key: string, value: string, ttl?: number): Promise<void> {
-    await this.client.set(key, value);
-    if (ttl) {
-      await this.client.expire(key, ttl);
-    }
-  }
-
-  async get(key: string): Promise<string | null> {
-    return await this.client.get(key);
-  }
-  
-  private async loadTemplates() {
-    try {
-      const templatePath = path.join(process.cwd(), 'src', this.configPath, 'prompt-templates.yaml');
-      this.logger.log(`Loading templates from: ${templatePath}`);
-      const content = await fs.promises.readFile(templatePath, 'utf8');
-      const parsed = yaml.parse(content);
-      
-      for (const [name, template] of Object.entries(parsed.system_templates)) {
-        this.templates.set(name, template as string);
-      }
-      
-      this.logger.log(`成功加载${this.templates.size}个提示模板`);
-    } catch (error) {
-      this.logger.error('加载提示模板失败', error.stack);
-    }
-  }
-
-  private setupFileWatcher() {
-    const watchPath = path.join(process.cwd(), 'src', this.configPath);
-    this.logger.log(`Setting up file watcher for: ${watchPath}`);
-    
-    const watcher = fs.watch(watchPath, (eventType, filename) => {
-      if (filename === 'prompt-templates.yaml') {
-        this.logger.log('检测到模板文件变更，重新加载...');
-        this.loadTemplates();
-      }
-    });
-    
-    watcher.on('error', error => {
-      this.logger.error('文件监视错误', error.stack);
-    });
-  }
-
-  getTemplate(name: string): string {
-    const template = this.templates.get(name);
-    if (!template) {
-      throw new Error(`找不到提示模板: ${name}`);
-    }
-    return template;
-  }
+  // analyzeCrossSourceRelations method remains, logic to be updated next
 
   async analyzeCrossSourceRelations(sources: Array<{
     mcpServer: string;
@@ -86,26 +18,65 @@ export class RedisService {
   }>): Promise<any> {
     this.logger.log(`开始分析数据源关系：${sources.map(s => `${s.mcpServer}:${s.resourceUri}`).join(', ')}`);
     
-    // 1. 准备LLM分析请求
-    const analysisPrompt = `请分析以下数据源的关联关系：
-      ${sources.map((s, i) => `数据源 ${i + 1}:\n类型: ${s.dataType}\n路径: ${s.resourceUri}`).join('\n\n')}`;
+    this.logger.log(`开始分析数据源关系：${sources.map(s => `${s.mcpServer}:${s.resourceUri}`).join(', ')}`);
 
-    // 2. 调用LLM服务
-    const llmResponse = await this.llmAdapter.analyze({
-      templateType: 'data-relation-analysis',
-      variables: {
-        analysisPrompt: analysisPrompt
+    // 1. Build the prompt for the LLM
+    // Consider using a template from LlmAdapterService if available and suitable
+    // const prompt = this.llmAdapter.renderTemplate('data-relation-analysis', { sources });
+    const sourceDescriptions = sources.map((s, i) =>
+      `Source ${i + 1}: Type=${s.dataType}, Server=${s.mcpServer}, URI=${s.resourceUri}`
+    ).join('\n');
+    const prompt = `Analyze the potential relationships, dependencies, and data flows between the following data sources:\n${sourceDescriptions}\n\nDescribe the key relationships and suggest potential integration points or conflicts. Format the response as JSON with keys "relationships" (array of strings) and "recommendations" (array of strings).`;
+
+    this.logger.debug(`Generated data relation analysis prompt: ${prompt.substring(0, 200)}...`);
+
+    try {
+      // 2. Call the LLM using generateCompletion
+      const llmResultString = await this.llmAdapter.generateCompletion(prompt, {
+        // Add metadata if needed for routing
+        requestType: 'data-relation-analysis'
+      });
+
+      this.logger.debug(`LLM result string: ${llmResultString}`);
+
+      // 3. Parse the LLM response (assuming it returns JSON as requested)
+      let analysisResult = { relationships: [], recommendations: [] };
+      try {
+        // Attempt to find JSON block within the response if the LLM adds extra text
+        const jsonMatch = llmResultString.match(/```json\s*([\s\S]*?)\s*```|({[\s\S]*})/);
+        if (jsonMatch) {
+           analysisResult = JSON.parse(jsonMatch[1] || jsonMatch[2]);
+        } else {
+           this.logger.warn('Could not find JSON block in LLM response for data relation analysis. Attempting to parse the whole string.');
+           analysisResult = JSON.parse(llmResultString); // Try parsing the whole string
+        }
+         // Basic validation
+         if (!Array.isArray(analysisResult.relationships) || !Array.isArray(analysisResult.recommendations)) {
+             throw new Error('Parsed JSON does not have the expected structure ({relationships: [], recommendations: []})');
+         }
+      } catch (parseError: unknown) {
+        this.logger.error(`Failed to parse LLM response for data relation analysis: ${parseError instanceof Error ? parseError.message : '未知错误'}. Raw response: ${llmResultString}`);
+        // Return an error structure or throw?
+        return {
+          correlationId: require('crypto').randomUUID(),
+          status: "failed",
+          error: "Failed to parse LLM analysis result.",
+          rawResponse: llmResultString
+        };
       }
-    });
 
-    // 3. 生成分析ID
-    const correlationId = require('crypto').randomUUID();
+      // 4. Return the structured result
+      const correlationId = require('crypto').randomUUID();
+      return {
+        correlationId,
+        status: "completed",
+        analysis: analysisResult.relationships,
+        recommendations: analysisResult.recommendations
+      };
 
-    return { 
-      correlationId,
-      status: "completed",
-      analysis: llmResponse.plan,
-      recommendations: llmResponse.recommendations
-    };
+    } catch (error: unknown) {
+       this.logger.error(`Error during data relation analysis LLM call: ${error instanceof Error ? error.message : '未知错误'}`, error instanceof Error ? error.stack : undefined);
+       throw new Error(`Data relation analysis failed: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
   }
 }

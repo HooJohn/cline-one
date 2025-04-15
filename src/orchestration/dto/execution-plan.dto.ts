@@ -6,7 +6,7 @@ import { RoutingPolicyDto } from './routing-policy.dto';
 
 
 export class ExecutionPlanDto {
-  optimizationLog: string[]; // 添加缺失的优化日志字段
+  optimizationLog: string[] = []; // 添加缺失的优化日志字段
   @ApiProperty({ 
     description: 'List of tasks included in this execution plan',
     type: [WorkflowTaskDto] 
@@ -14,7 +14,7 @@ export class ExecutionPlanDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => WorkflowTaskDto)
-  tasks: WorkflowTaskDto[];
+  tasks: WorkflowTaskDto[] = [];
 
   @ApiProperty({ 
     description: 'List of routing policies applicable to this plan',
@@ -23,7 +23,7 @@ export class ExecutionPlanDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RoutingPolicyDto)
-  policies: RoutingPolicyDto[];
+  policies: RoutingPolicyDto[] = [];
 
   @ApiProperty({ 
     description: 'Version identifier for this execution plan',
@@ -32,5 +32,5 @@ export class ExecutionPlanDto {
   @IsNotEmpty() // Added IsNotEmpty for completeness
   @IsString()
   // Consider adding @Matches(/^\d+\.\d+\.\d+$/, { message: 'Version must be in semver format (e.g., 1.0.0)' }) if strict format is needed
-  version: string;
+  version: string = '1.0.0';
 }

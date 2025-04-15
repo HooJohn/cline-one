@@ -4,11 +4,15 @@ import { FileService } from '../interfaces/file-service.interface';
 
 @Module({
   providers: [
+    NodeFileService,
     {
       provide: 'FileService',
       useClass: NodeFileService
     }
   ],
-  exports: ['FileService']
+  exports: [
+    NodeFileService,
+    'FileService'
+  ]
 })
 export class NodeAdapterModule {}
