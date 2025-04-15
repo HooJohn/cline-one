@@ -2,7 +2,7 @@ import { Controller, Post, Body, Get } from '@nestjs/common';
 import { McpDiscoveryService } from './mcp-discovery.service';
 import { McpServer } from '../../interfaces/mcp-server.interface';
 
-@Controller('api/v1/mcp-gateway')
+@Controller('api/mcp/discovery')
 export class McpDiscoveryController {
   constructor(private readonly discoveryService: McpDiscoveryService) {}
 

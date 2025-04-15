@@ -1,9 +1,20 @@
 # 业务流程策略
 policies:
-  - name: default-workflow
-    description: 默认业务流程策略
+  - name: default-chat-workflow
+    description: 聊天任务处理流程
     steps:
       - name: validate-input
         type: validation
-      - name: process-task  
+        timeout: 5000
+      - name: llm-processing
         type: execution
+        timeout: 60000
+        retryPolicy:
+          maxAttempts: 3
+          backoff: 1000
+        resources:
+          - type: llm
+            provider: deepseek
+      - name: store-result
+        type: persistence
+        timeout: 10000

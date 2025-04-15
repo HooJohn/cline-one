@@ -39,7 +39,7 @@ export class LlmRouterService implements OnModuleInit {
     // or rely on LlmAdapterService/Module to provide them.
     // For now, we just load the policy.
   ) {
-    const configPath = this.configService.get<string>('CONFIG_PATH') || 'config';
+    const configPath = this.configService.get<string>('CONFIG_PATH') || 'src/config';
     this.policyFilePath = path.join(process.cwd(), configPath, 'routing-policies.yaml');
   }
 

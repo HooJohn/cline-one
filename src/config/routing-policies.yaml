@@ -6,8 +6,24 @@ servers:
   - id: backup-node 
     endpoint: "http://backup-server:3000"
     protocol: http
+  - id: deepseek-llm  # 新增Deepseek服务节点
+    endpoint: "http://localhost:4000"  # Deepseek服务实际运行端口
+    protocol: http
+    metadata:
+      serviceType: llm
+      provider: deepseek
 
 routingRules:
+  # LLM服务专用路由
+  - pattern: "^/api/llm/.*"
+    priority: 0  # 更高优先级
+    targetServers: 
+      - "deepseek-llm"
+    timeout: 30000
+    retryPolicy:
+      attempts: 3
+      backoff: 1000
+  
   - pattern: "^/api/v1/.*"
     priority: 1
     targetServers: 
@@ -17,3 +33,14 @@ routingRules:
       windowMs: 60000
       max: 100
       queueEnabled: true
+
+default_strategy: specific
+default_providers:
+  - deepseek
+
+rules:
+  - id: default-rule
+    description: Default rule to use DeepSeek
+    strategy: specific
+    providers:
+      - deepseek

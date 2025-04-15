@@ -6,7 +6,6 @@ class EnvironmentVariables {
   // LLM 配置
   @IsString()
   @IsNotEmpty()
-  @Matches(/^enc:/, { message: 'DEEPSEEK_API_KEY must be encrypted (start with "enc:")' })
   DEEPSEEK_API_KEY!: string;
 
   @IsString()

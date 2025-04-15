@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { DeepseekProvider } from '../../../src/llm/providers/deepseek.provider';
-import { EncryptionService } from '../../../src/core/services/encryption.service';
 import axios from 'axios';
 
 jest.mock('axios');
@@ -10,15 +9,11 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
 describe('DeepseekProvider', () => {
   let provider: DeepseekProvider;
   let configService: ConfigService;
-  let encryptionService: EncryptionService;
-
   const mockConfig: Record<string, string> = {
-    'DEEPSEEK_API_KEY': 'enc:encrypted-api-key',
+    'DEEPSEEK_API_KEY': 'valid-api-key-12345678901234567890',
     'DEEPSEEK_API_BASE': 'https://api.deepseek.com',
     'DEEPSEEK_MODEL': 'deepseek-chat'
   };
-
-  const mockDecryptedApiKey = 'mock-decrypted-api-key-12345678901234567890';
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -30,23 +25,11 @@ describe('DeepseekProvider', () => {
             get: jest.fn((key: string) => mockConfig[key]),
           },
         },
-        {
-          provide: EncryptionService,
-          useValue: {
-            decrypt: jest.fn((key: string) => {
-              if (key === 'enc:encrypted-api-key') {
-                return mockDecryptedApiKey;
-              }
-              return null;
-            }),
-          },
-        },
       ],
     }).compile();
 
     provider = module.get<DeepseekProvider>(DeepseekProvider);
     configService = module.get<ConfigService>(ConfigService);
-    encryptionService = module.get<EncryptionService>(EncryptionService);
   });
 
   it('应该正确初始化', () => {
@@ -54,7 +37,6 @@ describe('DeepseekProvider', () => {
     expect(configService.get).toHaveBeenCalledWith('DEEPSEEK_API_KEY');
     expect(configService.get).toHaveBeenCalledWith('DEEPSEEK_API_BASE');
     expect(configService.get).toHaveBeenCalledWith('DEEPSEEK_MODEL');
-    expect(encryptionService.decrypt).toHaveBeenCalledWith('enc:encrypted-api-key');
   });
 
   it('应该生成响应', async () => {
@@ -87,7 +69,7 @@ describe('DeepseekProvider', () => {
       },
       expect.objectContaining({
         headers: expect.objectContaining({
-          'Authorization': `Bearer ${mockDecryptedApiKey}`,
+          'Authorization': `Bearer valid-api-key-12345678901234567890`,
         })
       })
     );

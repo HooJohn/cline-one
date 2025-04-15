@@ -42,7 +42,11 @@ export const mcpServers: McpServerConfig[] = [
       '-y',
       '@smithery/cli@latest',
       'run',
-      'llm-worker'
+      'llm-worker',
+      '--provider',
+      'deepseek',
+      '--model',
+      'deepseek-chat'
     ],
     env: {
       ['DEEPSEEK_API_KEY']: process.env['DEEPSEEK_API_KEY'] || '',
@@ -53,4 +57,4 @@ export const mcpServers: McpServerConfig[] = [
       'analyze'
     ]
   }
-]; 
+];

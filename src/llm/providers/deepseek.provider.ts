@@ -1,6 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EncryptionService } from '../../core/services/encryption.service';
 import axios, { AxiosRequestConfig } from 'axios';
 import * as https from 'https';
 import { LlmProvider } from '../../interfaces/llm-provider.interface'; // Corrected path
@@ -24,14 +23,12 @@ export class DeepseekProvider implements LlmProvider { // Rename class to Deepse
   
   constructor(
     private readonly configService: ConfigService,
-    @Inject(EncryptionService) private readonly encryptionService: EncryptionService
   ) {
-    const encryptedApiKey = this.configService.get<string>('DEEPSEEK_API_KEY');
-    if (!encryptedApiKey) {
+    const apiKey = this.configService.get<string>('DEEPSEEK_API_KEY');
+    if (!apiKey) {
       throw new Error('DEEPSEEK_API_KEY is not configured');
     }
-    
-    this.apiKey = this.encryptionService.decrypt(encryptedApiKey);
+    this.apiKey = apiKey;
     this.apiBase = this.configService.get<string>('DEEPSEEK_API_BASE') || 'https://api.deepseek.com';
     this.model = this.configService.get<string>('DEEPSEEK_MODEL') || 'deepseek-chat';
     this.provider = 'deepseek';
